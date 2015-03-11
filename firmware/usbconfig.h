@@ -1,0 +1,1 @@
+../software/fd_usb_module/usbconfig.h
