@@ -1,0 +1,102 @@
+v 20110115 2
+B 500 300 1800 1900 3 0 0 0 -1 -1 0 -1 -1 -1 -1 -1
+P 200 1800 500 1800 1 0 0
+{
+T 200 1800 5 10 0 0 0 0 1
+pintype=pow
+T 555 1795 5 10 1 1 0 0 1
+pinlabel=Ucc
+T 405 1845 5 10 1 1 0 6 1
+pinnumber=5
+T 200 1800 5 10 0 0 0 0 1
+pinseq=5
+}
+P 200 1400 500 1400 1 0 0
+{
+T 200 1400 5 10 0 0 0 0 1
+pintype=in
+T 555 1395 5 10 1 1 0 0 1
+pinlabel=IN_HI
+T 405 1445 5 10 1 1 0 6 1
+pinnumber=1
+T 200 1400 5 10 0 0 0 0 1
+pinseq=1
+}
+P 200 1000 500 1000 1 0 0
+{
+T 200 1000 5 10 0 0 0 0 1
+pintype=in
+T 555 995 5 10 1 1 0 0 1
+pinlabel=IN_LO
+T 405 1045 5 10 1 1 0 6 1
+pinnumber=2
+T 200 1000 5 10 0 0 0 0 1
+pinseq=2
+}
+P 200 600 500 600 1 0 0
+{
+T 200 600 5 10 0 0 0 0 1
+pintype=pow
+T 555 595 5 10 1 1 0 0 1
+pinlabel=GND
+T 405 645 5 10 1 1 0 6 1
+pinnumber=3
+T 200 600 5 10 0 0 0 0 1
+pinseq=3
+}
+P 2600 1800 2300 1800 1 0 0
+{
+T 2600 1800 5 10 0 0 0 0 1
+pintype=pas
+T 2245 1795 5 10 1 1 0 6 1
+pinlabel=VBOOT
+T 2395 1845 5 10 1 1 0 0 1
+pinnumber=8
+T 2600 1800 5 10 0 0 0 0 1
+pinseq=8
+}
+P 2600 1400 2300 1400 1 0 0
+{
+T 2600 1400 5 10 0 0 0 0 1
+pintype=pas
+T 2245 1395 5 10 1 1 0 6 1
+pinlabel=DRV_HI
+T 2395 1445 5 10 1 1 0 0 1
+pinnumber=7
+T 2600 1400 5 10 0 0 0 0 1
+pinseq=7
+}
+P 2600 1000 2300 1000 1 0 0
+{
+T 2600 1000 5 10 0 0 0 0 1
+pintype=pas
+T 2245 995 5 10 1 1 0 6 1
+pinlabel=Bridge
+T 2395 1045 5 10 1 1 0 0 1
+pinnumber=6
+T 2600 1000 5 10 0 0 0 0 1
+pinseq=6
+}
+P 2600 600 2300 600 1 0 0
+{
+T 2600 600 5 10 0 0 0 0 1
+pintype=pas
+T 2245 595 5 10 1 1 0 6 1
+pinlabel=DRV_LO
+T 2395 645 5 10 1 1 0 0 1
+pinnumber=4
+T 2600 600 5 10 0 0 0 0 1
+pinseq=4
+}
+T 500 2200 8 10 1 1 0 0 1
+device=NCP5181
+T -1300 700 8 10 0 1 0 0 1
+footprint=SO8
+T 1200 300 8 10 0 1 0 0 1
+description=MOSFET high- and low-side driver
+T -600 -100 8 10 1 1 0 0 1
+numslots=1
+T 700 200 8 10 0 1 0 0 1
+author=Filip Dominec
+T 2100 2200 8 10 1 1 0 0 1
+refdes=U?

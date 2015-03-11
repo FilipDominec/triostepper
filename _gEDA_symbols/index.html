@@ -1,0 +1,50 @@
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<title>gedasymbols: Filip Dominec</title>
+<link rel="stylesheet" href="/gedasymbols.css" type="text/css">
+</head>
+
+<body>
+<h1>Filip Dominec</h1>
+
+
+
+Filip Dominec <br>
+contact: <a href="http://fzu.cz/~dominecf/">http://fzu.cz/~dominecf/</a><br>
+Note: all my footprints are licensed under BSD or compatible license.
+
+<h2>Symbols</h2>
+<h3>Common SMD components</h3>
+<img alt="BEC-transistor" src="symbols/BEC-transistor.png" align="right">
+<p> These symbols are useful if you use surface mount transistors in the standard SOT23 package, which have often the <i >"1-B, 2-E, 3-C" </i> pins assignment. Similar holds for small unipolar transistors. (For example, I use often: <a href="http://www.alldatasheet.com/view.jsp?Searchword=BC850">BC850</a>, <a href="http://www.alldatasheet.com/view.jsp?Searchword=BCW66H">BCW66H</a>, <a href="http://www.alldatasheet.com/view.jsp?Searchword=BCW68H">BCW68H</a>, <a href="http://www.alldatasheet.com/view.jsp?Searchword=BC859">BC859</a>, <a href="http://www.alldatasheet.com/view.jsp?Searchword=2N7002">2N7002</a>.)
+<p> Before I made these symbols, I had to manually edit the netlist file so that the <i >"Q1-B"</i> pin is renamed to <i >"Q1-1"</i> etc. Otherwise the autorouter did not route to the pin. 
+<p> Similar issues still occur e. g. for polarized capacitors on some non-capacitor-specific footprints. To fix an existing file, you may use global find and replace. On Linux, save following command to a script and run it, passing the netlist filename as a parameter: <i >cp $1 $1.old; cat $1.old  | sed -e 's/\(C[0-9]\+\)-N/\1-1/g' -e 's/\(C[0-9]\+\)-P/\1-2/g' > $1</i>.
+<ul>
+<li> <a href="symbols/NPN_SOT23_BEC.sym">NPN_SOT23_BEC.sym</a> - a common bipolar NPN transistor   </li>
+<li> <a href="symbols/PNP_SOT23_BEC.sym">PNP_SOT23_BEC.sym</a> -  a common bipolar PNP transistor </li>
+<li> <a href="symbols/NMOS_SOT23_GSD.sym">NMOS_SOT23_GSD.sym</a> - a common unipolar N-channel transistor </li>
+<li> <a href="symbols/PMOS_SOT23_GSD.sym">PMOS_SOT23_GSD.sym</a> - a common unipolar P-channel transistor </li>
+</ul>
+<h3>Other</h3>
+<ul>
+<li> <a href="symbols/ATtiny24.sym">ATtiny24.sym</a> - Atmel Tiny 8-bit microcontroller, 2 kB flash, 128 B RAM; pinout similar to ATtiny44 and ATtiny84</li>
+</ul>
+
+<p><br></p>
+<p><hr noshade size=1></p>
+
+<small>
+
+<p align=center>
+
+Copyright 2012, all rights reserved unless specified otherwise. 
+<br>
+<a href="/">gedasymbols.org</a> is maintained by
+<a href="/user/dj_delorie/">DJ Delorie</a></p>
+
+</small>
+
+</body>
+</html>
+
