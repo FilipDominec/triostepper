@@ -85,16 +85,10 @@ PROGMEM const char usbHidReportDescriptor[22] = {	/* USB report descriptor */
 #define MOTOR3_DDR DDRD
 #define MOTOR3_PORT PORTD
 /// End-sensors
-#define M1_END_SENSOR_PORT PINB
-#define M1_END_SENSOR_PIN  _BV(PB4)
-#define M2_END_SENSOR_PORT PINB
-#define M2_END_SENSOR_PIN  _BV(PB5)
-#define M3_END_SENSOR_PORT PIND
-#define M3_END_SENSOR_PIN  _BV(PD0)
-
-#define AT_END_SENSOR1 ((M1_END_SENSOR_PORT & M1_END_SENSOR_PIN) == 0)
-#define AT_END_SENSOR2 ((M2_END_SENSOR_PORT & M2_END_SENSOR_PIN) == 0)
-#define AT_END_SENSOR3 ((M3_END_SENSOR_PORT & M3_END_SENSOR_PIN) == 0)
+#define SETUP_END_SENSORS {PORTB |= _BV(PB4); PORTB |= _BV(PB5); PORTD |= _BV(PD0); }
+#define AT_END_SENSOR1 ((PINB & _BV(PB4)) == 0)
+#define AT_END_SENSOR2 ((PINB & _BV(PB5)) == 0)
+#define AT_END_SENSOR3 ((PIND & _BV(PD0)) == 0)
 
 /// Drill PWM control
 #define DRILL_PWM_PORT PORTC	
@@ -250,13 +244,9 @@ uchar   usbFunctionRead(uchar *data, uchar len)
 
 int main(void) /*{{{*/
 {
-
-    /// End sensors pull-up
-    //M1_END_SENSOR_PORT |= M1_END_SENSOR_PIN;
-    //M2_END_SENSOR_PORT |= M2_END_SENSOR_PIN;
-    M3_END_SENSOR_PORT |= M3_END_SENSOR_PIN;
     
-    /// Enable output pins ...
+    // Enable input and output pins
+    SETUP_END_SENSORS;
     MOTOR1_DDR |= MOTOR1_PINS;
     MOTOR2_DDR |= MOTOR2_PINS;
     MOTOR3_DDR |= MOTOR3_PINS;
@@ -300,10 +290,10 @@ int main(void) /*{{{*/
 			// PWM cycle, called at 488 Hz
 			if (global_pwm_counter == 0) {
 				sei();
-				// Check arrival at the end sensor
-				//if AT_END_SENSOR3 { target_nanopos[2] = nanopos[2]; } // TODO
-				if AT_END_SENSOR3 
-					for (uint8_t m=0; m<3; m++) { target_nanopos[m] = nanopos[m] + 1000; } // XXX temporary
+				// Check arrival at the end sensor; if so, simply clip the motion to current position
+				if AT_END_SENSOR1 { target_nanopos[1-1] = nanopos[1-1]; } 
+				if AT_END_SENSOR2 { target_nanopos[2-1] = nanopos[2-1]; } 
+				if AT_END_SENSOR3 { target_nanopos[3-1] = nanopos[3-1]; } 
 
 				for (uint8_t m=0; m<3; m++) {		// repeat for each motor m 
 					// Set new value of position or PWM for microstepping
