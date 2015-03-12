@@ -85,24 +85,33 @@ PROGMEM const char usbHidReportDescriptor[22] = {	/* USB report descriptor */
 #define MOTOR3_DDR DDRD
 #define MOTOR3_PORT PORTD
 /// End-sensors
-#define M1_END_SENSOR_PORT PORTB
+#define M1_END_SENSOR_PORT PINB
 #define M1_END_SENSOR_PIN  _BV(PB4)
-#define M2_END_SENSOR_PORT PORTB
+#define M2_END_SENSOR_PORT PINB
 #define M2_END_SENSOR_PIN  _BV(PB5)
-#define M3_END_SENSOR_PORT PORTD
+#define M3_END_SENSOR_PORT PIND
 #define M3_END_SENSOR_PIN  _BV(PD0)
+
+#define AT_END_SENSOR1 ((M1_END_SENSOR_PORT & M1_END_SENSOR_PIN) == 0)
+#define AT_END_SENSOR2 ((M2_END_SENSOR_PORT & M2_END_SENSOR_PIN) == 0)
+#define AT_END_SENSOR3 ((M3_END_SENSOR_PORT & M3_END_SENSOR_PIN) == 0)
+
 /// Drill PWM control
 #define DRILL_PWM_PORT PORTC	
 #define DRILL_PWM_DDR  DDRB
 #define DRILL_PWM_PIN  _BV(PC5)
 /*}}}*/
+
 /// Following global variables concern communication etc.
 #define USB_INPUT_BUFFER_LENGTH 32
 uint8_t usb_input_buffer[USB_INPUT_BUFFER_LENGTH];
 uint8_t usb_input_bufptr;
 
 #define MAX_CMD_LENGTH 32
-#define MAX_CMD_ 32
+#define MAX_CMD_COUNT 16
+uint8_t command_buffer[MAX_CMD_LENGTH*MAX_CMD_COUNT];
+uint8_t command_ptr;
+uint8_t command_count;
 
 
 // Peripheral control variables/*{{{*/
@@ -121,11 +130,12 @@ volatile uint8_t global_pwm_counter;		// counts timer interrupts, determines whe
 volatile char status[3]; 		
 #define STATUS_IDLE 0
 #define STATUS_RUNNING 1
-volatile static uint32_t nanopos[3];		// stores the motor position with bit depth sufficient not only for PWM "microsteps"
-				 							// but also for PWM speed control "nanosteps"
-volatile static uint32_t real_step[3]; 			//   |-->  calculated base step of motor
-volatile static uint8_t  real_pwm[3];			//   '-->  calculated PWM value
-volatile static uint32_t target_nanopos[3];		// motor position that shall be reached (usually set by incoming command)
+
+volatile static uint32_t nanopos[3];	// stores the motor position with bit depth sufficient not only for PWM "microsteps"
+				 	// but also for PWM speed control "nanosteps"
+volatile static uint32_t real_step[3]; 		//   |-->  calculated base step of motor
+volatile static uint8_t  real_pwm[3];		//   '-->  calculated PWM value
+volatile static uint32_t target_nanopos[3];	// motor position that shall be reached (usually set by incoming command)
 volatile static uint32_t nanospeed[3];		// value that increments/decrements the real_nanopos each PWM cycle
 /*}}}*/
 const uint16_t lookup_table[MICROSTEP_PER_STEP+1] = {/*     MOTOR CONTROL{{{*/
@@ -190,7 +200,7 @@ usbRequest_t	*rq = (void *)data;
 			usb_input_bufptr = 0;
 			return USB_NO_MSG;  /* use usbFunctionWrite() to receive data from host */
 		}
-	}else{
+	} else {
 		/* ignore vendor type requests, we don't use any */
 	}
 	return 0;
@@ -225,13 +235,16 @@ uchar   usbFunctionWrite(uchar *data, uchar len) /*{{{*/
 	return 0;
 }
 /*}}}*/
-/* usbFunctionRead() is called when the host requests a chunk of data from 	{{{ 
- * the device. For more information see the documentation in usbdrv/usbdrv.h.
- */
 uchar   usbFunctionRead(uchar *data, uchar len)
 {
-	data[0] = status[0] + 2*status[1] + 4*status[2];
-	return 1;
+	// return one byte containing running/idle status, end switch detection, buffer empty, buffer full 
+	data[0] = 0x00;
+	if ((status[0]) || status[1] || status[2]) 
+		{data[0] |= 0x01;}
+	if AT_END_SENSOR1 {data[0] |= 0x02;}
+	if AT_END_SENSOR2 {data[0] |= 0x04;}
+	if AT_END_SENSOR3 {data[0] |= 0x08;}
+	return 1; 
 }
 /*}}}*/
 
@@ -241,7 +254,7 @@ int main(void) /*{{{*/
     /// End sensors pull-up
     //M1_END_SENSOR_PORT |= M1_END_SENSOR_PIN;
     //M2_END_SENSOR_PORT |= M2_END_SENSOR_PIN;
-    //M3_END_SENSOR_PORT |= M3_END_SENSOR_PIN;
+    M3_END_SENSOR_PORT |= M3_END_SENSOR_PIN;
     
     /// Enable output pins ...
     MOTOR1_DDR |= MOTOR1_PINS;
@@ -284,25 +297,29 @@ int main(void) /*{{{*/
 			/// PWM check
 			global_pwm_counter++; global_pwm_counter %= MICROSTEP_PER_STEP;
 			/// Let the USB driver check for incoming packets (at the end of this interrupt routine) <--- todo: why?
-			//if (global_pwm_counter == 0) 
-			//{
-			  //usbPoll();
-			//};
-			
 			// PWM cycle, called at 488 Hz
 			if (global_pwm_counter == 0) {
 				sei();
-				// PORTC |= _BV(PC4); PORTC &= ~(_BV(PC4)); 		// debug
+				// Check arrival at the end sensor
+				//if AT_END_SENSOR3 { target_nanopos[2] = nanopos[2]; } // TODO
+				if AT_END_SENSOR3 
+					for (uint8_t m=0; m<3; m++) { target_nanopos[m] = nanopos[m] + 1000; } // XXX temporary
+
 				for (uint8_t m=0; m<3; m++) {		// repeat for each motor m 
 					// Set new value of position or PWM for microstepping
 					if (nanopos[m] < target_nanopos[m]) {
-						if ((nanopos[m]+nanospeed[m]) <= target_nanopos[m]) {nanopos[m]=nanopos[m]+nanospeed[m];}
-						else { nanopos[m] = target_nanopos[m]; };
+						if ((nanopos[m]+nanospeed[m]) <= target_nanopos[m]) 
+							{nanopos[m] = nanopos[m]+nanospeed[m];}
+						else 
+							{nanopos[m] = target_nanopos[m];};
 					};
 					if (nanopos[m] > target_nanopos[m]) {
-						if ((nanopos[m]-nanospeed[m]) >= target_nanopos[m]) {nanopos[m]=nanopos[m]-nanospeed[m];}
-						else { nanopos[m] = target_nanopos[m];};
+						if ((nanopos[m]-nanospeed[m]) >= target_nanopos[m]) 
+							{nanopos[m] = nanopos[m]-nanospeed[m];}
+						else 
+							{nanopos[m] = target_nanopos[m];};	  // arrived
 					};
+
 					if (nanopos[m] == target_nanopos[m]) { status[m] = STATUS_IDLE;} 
 					else { status[m] = STATUS_RUNNING; }
 					// Precalculate values for the PWM routine
