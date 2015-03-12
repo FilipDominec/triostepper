@@ -31,4 +31,5 @@ Simple ATMega8-based controller for three stepper motors
    * [ ] CMD_WRITE_MY_ID
    * [ ] CMD_I2C_TRANSMIT
    * [ ] CMD_I2C_RECEIVE
+ * [ ] make the microstepping lookup table nonlinear (sine/cosine  instead of  linear ramp/constant)
  * [ ] slow speed ramp (to avoid step skipping)

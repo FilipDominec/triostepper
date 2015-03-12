@@ -103,9 +103,9 @@ uint8_t usb_input_bufptr;
 
 #define MAX_CMD_LENGTH 32
 #define MAX_CMD_COUNT 16
-uint8_t command_buffer[MAX_CMD_LENGTH*MAX_CMD_COUNT];
-uint8_t command_ptr;
-uint8_t command_count;
+uint8_t cmdbuf[MAX_CMD_LENGTH*MAX_CMD_COUNT];
+uint8_t cmdbufS;
+uint8_t cmdbufE;
 
 
 // Peripheral control variables/*{{{*/
@@ -200,35 +200,68 @@ usbRequest_t	*rq = (void *)data;
 	return 0;
 }
 /*}}}*/
+#define CMDBUF_NOT_EMPTY  (cmdbufS != cmdbufE)
+#define CMDBUF_NOT_FULL   (((cmdbufS-1+MAX_CMD_COUNT)%MAX_CMD_COUNT) != cmdbufE)
+#define CMD_IS_BUFFERED_TYPE (usb_input_buffer[0] & 0xf0) 
+
+void execute_command_immediate()
+{
+}
+
+void execute_command_from_buffer()
+{
+	cli(); 				// atomic operation
+	if (cmdbuf[MAX_CMD_LENGTH*cmdbufS] == CMD_MOVE) {		/// "Move" command
+		target_nanopos[0] = *((uint32_t*)(usb_input_buffer+1));
+		target_nanopos[1] = *((uint32_t*)(usb_input_buffer+5));
+		target_nanopos[2] = *((uint32_t*)(usb_input_buffer+9));
+		nanospeed[0]      = *((uint32_t*)(usb_input_buffer+13));
+		nanospeed[1]      = *((uint32_t*)(usb_input_buffer+17));
+		nanospeed[2]      = *((uint32_t*)(usb_input_buffer+21));
+	}
+	if ((usb_input_buffer[0] == CMD_SET_DRILL_PWM)) {	 /// Sets average voltage on the drill 
+		drill_pwm = *((uint8_t*)(usb_input_buffer+1));
+	}
+	// TODO clear buf at cmdbufS
+	sei();
+}
+
+
 uchar   usbFunctionWrite(uchar *data, uchar len) /*{{{*/
 {	
-	/// Store all chunks in usb_input_buffer
+	/// Store all chunks in temporary usb_input_buffer
 	uint8_t dataptr;
-	for (dataptr=0; dataptr < len; dataptr++)
-	{
-			(usb_input_buffer[usb_input_bufptr]) = (uint8_t)data[dataptr];
-			usb_input_bufptr++;
-	};
+	for (dataptr=0; dataptr < len; dataptr++) {
+		(usb_input_buffer[usb_input_bufptr]) = (uint8_t)data[dataptr];
+		usb_input_bufptr++; }
 	
-	/// At the last chunk process the received message 
-	if (len < 8)
+	/// At the last chunk, process the received message 
+	if (len < 8) 
 	{
-		if ((usb_input_buffer[0] == CMD_MOVE)) {		/// "Move" command
-			target_nanopos[0] = *((uint32_t*)(usb_input_buffer+1));
-			target_nanopos[1] = *((uint32_t*)(usb_input_buffer+5));
-			target_nanopos[2] = *((uint32_t*)(usb_input_buffer+9));
-			nanospeed[0]      = *((uint32_t*)(usb_input_buffer+13));
-			nanospeed[1]      = *((uint32_t*)(usb_input_buffer+17));
-			nanospeed[2]      = *((uint32_t*)(usb_input_buffer+21));
+		if CMD_IS_BUFFERED_TYPE 
+		{
+			if CMDBUF_NOT_FULL 
+			{ 
+				cli();					// atomic (uninterrupted) copying
+				for (dataptr=0; dataptr < MAX_CMD_LENGTH; dataptr++) 
+				{ 
+					cmdbuf[MAX_CMD_LENGTH*cmdbufE + dataptr] = usb_input_buffer[dataptr]; 
+					usb_input_buffer[dataptr] = 0;// clean usb input buffer 
+				}
+				cmdbufE = (cmdbufE + 1)%MAX_CMD_COUNT; 	// shift the cyclic pointer
+				sei();
+			}
 		}
-		if ((usb_input_buffer[0] == CMD_SET_DRILL_PWM)) {	 /// Sets average voltage on the drill 
-			drill_pwm = *((uint8_t*)(usb_input_buffer+1));
-		}
-		return 1; /* return 1 if this was the last chunk */
+			// else drop command and  TODO report error
+		else execute_command_immediate();
+		return 1;   /* return 1 if this was the last chunk */
 	}
 	return 0;
 }
 /*}}}*/
+
+
+
 uchar   usbFunctionRead(uchar *data, uchar len)
 {
 	// return one byte containing running/idle status, end switch detection, buffer empty, buffer full 
@@ -279,6 +312,8 @@ int main(void) /*{{{*/
 	drill_pwm = 0;
 
 	for(;;){				
+		// TODO if idle1..3 && CMDBUF_NOT_EMPTY: execute_command_from_buffer();
+		
 		/// Check USB in any idle moment
 		usbPoll();
 
@@ -318,34 +353,15 @@ int main(void) /*{{{*/
 				}
 				if (drill_pwm > 0) DRILL_PWM_PORT |= DRILL_PWM_PIN; 
 			};
+			// Microstepping using the lookup table
 			if (global_pwm_counter == drill_pwm) DRILL_PWM_PORT &= ~(DRILL_PWM_PIN); 
 			set_motor1_step(real_step[0]+((lookup_table[real_pwm[0]]>>(global_pwm_counter))&0x0001)); 
 			set_motor2_step(real_step[1]+((lookup_table[real_pwm[1]]>>(global_pwm_counter))&0x0001)); 
 			set_motor3_step(real_step[2]+((lookup_table[real_pwm[2]]>>(global_pwm_counter))&0x0001)); 
 			timer_interrupt_occured = 0;
 		};
-	}
+	};
 	return 0;
 }
 /*}}}*/
 
-
-
-
-
-/*
-   OLD PWM IMPLEM
-			if (global_pwm_counter == 0) {
-					// for the first part of PWM cycle go to next step ...
-					if (real_pwm[0] > 0) set_motor1_step(real_step[0]+1); 
-					if (real_pwm[1] > 0) set_motor2_step(real_step[1]+1);
-					if (real_pwm[2] > 0) set_motor3_step(real_step[2]+1);
-					if (drill_pwm > 0) DRILL_PWM_PORT |= DRILL_PWM_PIN; 
-			}
-			// ... for the second part of PWM cycle remain at the base step
-			if (global_pwm_counter == real_pwm[0]) set_motor1_step(real_step[0]); 
-			if (global_pwm_counter == real_pwm[1]) set_motor2_step(real_step[1]);
-			if (global_pwm_counter == real_pwm[2]) set_motor3_step(real_step[2]);
-			if (global_pwm_counter == drill_pwm) DRILL_PWM_PORT &= ~(DRILL_PWM_PIN); 
-*/
-// TODO look at http://www.cnczone.com/forums/pcb_milling/97677-schematic_capture_dxf_file_-.html
