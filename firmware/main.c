@@ -200,6 +200,7 @@ usbRequest_t	*rq = (void *)data;
 	return 0;
 }
 /*}}}*/
+// TODO rename buffer to queue
 #define CMDBUF_NOT_EMPTY  (cmdbufS != cmdbufE)
 #define CMDBUF_NOT_FULL   (((cmdbufS-1+MAX_CMD_COUNT)%MAX_CMD_COUNT) != cmdbufE)
 #define CMD_IS_BUFFERED_TYPE (usb_input_buffer[0] & 0xf0) 
@@ -212,16 +213,16 @@ void execute_command_from_buffer()
 {
 	cli(); 				// atomic operation
 	if (cmdbuf[MAX_CMD_LENGTH*cmdbufS] == CMD_MOVE) {		/// "Move" command
-		target_nanopos[0] = *((uint32_t*)(usb_input_buffer+1));
-		target_nanopos[1] = *((uint32_t*)(usb_input_buffer+5));
-		target_nanopos[2] = *((uint32_t*)(usb_input_buffer+9));
-		nanospeed[0]      = *((uint32_t*)(usb_input_buffer+13));
-		nanospeed[1]      = *((uint32_t*)(usb_input_buffer+17));
-		nanospeed[2]      = *((uint32_t*)(usb_input_buffer+21));
+		target_nanopos[0] = *((uint32_t*)(cmdbuf+(MAX_CMD_LENGTH*cmdbufS)+1));
+		target_nanopos[1] = *((uint32_t*)(cmdbuf+(MAX_CMD_LENGTH*cmdbufS)+5));
+		target_nanopos[2] = *((uint32_t*)(cmdbuf+(MAX_CMD_LENGTH*cmdbufS)+9));
+		nanospeed[0]      = *((uint32_t*)(cmdbuf+(MAX_CMD_LENGTH*cmdbufS)+13));
+		nanospeed[1]      = *((uint32_t*)(cmdbuf+(MAX_CMD_LENGTH*cmdbufS)+17));
+		nanospeed[2]      = *((uint32_t*)(cmdbuf+(MAX_CMD_LENGTH*cmdbufS)+21));
 	}
-	if ((usb_input_buffer[0] == CMD_SET_DRILL_PWM)) {	 /// Sets average voltage on the drill 
-		drill_pwm = *((uint8_t*)(usb_input_buffer+1));
-	}
+	//if ((usb_input_buffer[0] == CMD_SET_DRILL_PWM)) {	 /// Sets average voltage on the drill 
+		//drill_pwm = *((uint8_t*)(usb_input_buffer+1));
+	//}
 	// TODO clear buf at cmdbufS
 	sei();
 }
@@ -251,8 +252,8 @@ uchar   usbFunctionWrite(uchar *data, uchar len) /*{{{*/
 				cmdbufE = (cmdbufE + 1)%MAX_CMD_COUNT; 	// shift the cyclic pointer
 				sei();
 			}
-		}
 			// else drop command and  TODO report error
+		}
 		else execute_command_immediate();
 		return 1;   /* return 1 if this was the last chunk */
 	}
@@ -261,13 +262,13 @@ uchar   usbFunctionWrite(uchar *data, uchar len) /*{{{*/
 /*}}}*/
 
 
+#define ALL_IDLE ((status[0] == STATUS_IDLE) || (status[1] == STATUS_IDLE) || (status[2] == STATUS_IDLE)) 
 
 uchar   usbFunctionRead(uchar *data, uchar len)
 {
 	// return one byte containing running/idle status, end switch detection, buffer empty, buffer full 
 	data[0] = 0x00;
-	if ((status[0]) || status[1] || status[2]) 
-		{data[0] |= 0x01;}
+	if ALL_IDLE       {data[0] |= 0x01;}
 	if AT_END_SENSOR1 {data[0] |= 0x02;}
 	if AT_END_SENSOR2 {data[0] |= 0x04;}
 	if AT_END_SENSOR3 {data[0] |= 0x08;}
@@ -287,6 +288,8 @@ int main(void) /*{{{*/
 
     DDRC |= _BV(PC4); // I2C communication pins
     DDRC |= _BV(PC5);
+    
+    cmdbufS = 0; cmdbufE = 0;
 
 	/// USB initialisation
 	odDebugInit(); usbInit(); usbDeviceDisconnect();  					// enforce re-enumeration
@@ -312,7 +315,7 @@ int main(void) /*{{{*/
 	drill_pwm = 0;
 
 	for(;;){				
-		// TODO if idle1..3 && CMDBUF_NOT_EMPTY: execute_command_from_buffer();
+		if (ALL_IDLE  && CMDBUF_NOT_EMPTY) execute_command_from_buffer(); // XXX test
 		
 		/// Check USB in any idle moment
 		usbPoll();
