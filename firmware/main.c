@@ -202,8 +202,8 @@ usbRequest_t	*rq = (void *)data;
 /*}}}*/
 // TODO rename buffer to queue
 #define CMDBUF_NOT_EMPTY  (cmdbufS != cmdbufE)
-#define CMDBUF_NOT_FULL   (((cmdbufS-1+MAX_CMD_COUNT)%MAX_CMD_COUNT) != cmdbufE)
-#define CMD_IS_BUFFERED_TYPE (usb_input_buffer[0] & 0xf0) 
+#define CMDBUF_NOT_FULL   (((cmdbufE+1)%MAX_CMD_COUNT) != cmdbufS)
+#define CMD_IS_NOT_BUFFERED_TYPE (usb_input_buffer[0] & 0xf0) 
 
 void execute_command_immediate()
 {
@@ -212,6 +212,7 @@ void execute_command_immediate()
 void execute_command_from_buffer()
 {
 	cli(); 				// atomic operation
+				//target_nanopos[2] += 10000; nanospeed[2] = 100; // XXX
 	if (cmdbuf[MAX_CMD_LENGTH*cmdbufS] == CMD_MOVE) {		/// "Move" command
 		target_nanopos[0] = *((uint32_t*)(cmdbuf+(MAX_CMD_LENGTH*cmdbufS)+1));
 		target_nanopos[1] = *((uint32_t*)(cmdbuf+(MAX_CMD_LENGTH*cmdbufS)+5));
@@ -220,10 +221,12 @@ void execute_command_from_buffer()
 		nanospeed[1]      = *((uint32_t*)(cmdbuf+(MAX_CMD_LENGTH*cmdbufS)+17));
 		nanospeed[2]      = *((uint32_t*)(cmdbuf+(MAX_CMD_LENGTH*cmdbufS)+21));
 	}
+	
 	//if ((usb_input_buffer[0] == CMD_SET_DRILL_PWM)) {	 /// Sets average voltage on the drill 
 		//drill_pwm = *((uint8_t*)(usb_input_buffer+1));
 	//}
 	// TODO clear buf at cmdbufS
+	cmdbufS = (cmdbufS + 1)%MAX_CMD_COUNT;
 	sei();
 }
 
@@ -239,7 +242,9 @@ uchar   usbFunctionWrite(uchar *data, uchar len) /*{{{*/
 	/// At the last chunk, process the received message 
 	if (len < 8) 
 	{
-		if CMD_IS_BUFFERED_TYPE 
+		if CMD_IS_NOT_BUFFERED_TYPE {
+			execute_command_immediate();}
+		else
 		{
 			if CMDBUF_NOT_FULL 
 			{ 
@@ -254,7 +259,6 @@ uchar   usbFunctionWrite(uchar *data, uchar len) /*{{{*/
 			}
 			// else drop command and  TODO report error
 		}
-		else execute_command_immediate();
 		return 1;   /* return 1 if this was the last chunk */
 	}
 	return 0;
@@ -262,7 +266,7 @@ uchar   usbFunctionWrite(uchar *data, uchar len) /*{{{*/
 /*}}}*/
 
 
-#define ALL_IDLE ((status[0] == STATUS_IDLE) || (status[1] == STATUS_IDLE) || (status[2] == STATUS_IDLE)) 
+#define ALL_IDLE ((status[0] == STATUS_IDLE) && (status[1] == STATUS_IDLE) && (status[2] == STATUS_IDLE)) 
 
 uchar   usbFunctionRead(uchar *data, uchar len)
 {
@@ -315,7 +319,6 @@ int main(void) /*{{{*/
 	drill_pwm = 0;
 
 	for(;;){				
-		if (ALL_IDLE  && CMDBUF_NOT_EMPTY) execute_command_from_buffer(); // XXX test
 		
 		/// Check USB in any idle moment
 		usbPoll();
@@ -327,7 +330,11 @@ int main(void) /*{{{*/
 			/// Let the USB driver check for incoming packets (at the end of this interrupt routine) <--- todo: why?
 			// PWM cycle, called at 488 Hz
 			if (global_pwm_counter == 0) {
-				sei();
+				sei(); // FIXME why??
+				
+				// possibly load a new command
+				if (ALL_IDLE  && CMDBUF_NOT_EMPTY) execute_command_from_buffer(); // XXX test
+
 				// Check arrival at the end sensor; if so, simply clip the motion to current position
 				if AT_END_SENSOR1 { target_nanopos[1-1] = nanopos[1-1]; } 
 				if AT_END_SENSOR2 { target_nanopos[2-1] = nanopos[2-1]; } 
