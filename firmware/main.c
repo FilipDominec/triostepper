@@ -103,9 +103,9 @@ uint8_t usb_input_bufptr;
 
 #define MAX_CMD_LENGTH 32
 #define MAX_CMD_COUNT 16
-uint8_t cmdbuf[MAX_CMD_LENGTH*MAX_CMD_COUNT];
-uint8_t cmdbufS;
-uint8_t cmdbufE;
+uint8_t cmdqueue[MAX_CMD_LENGTH*MAX_CMD_COUNT];
+uint8_t cmdqueueS; // cyclic queue start, ie. where commands are picked from
+uint8_t cmdqueueE; // cyclic queue end,   ie. where commands arrive to
 
 
 // Peripheral control variables/*{{{*/
@@ -114,7 +114,7 @@ uint8_t cmdbufE;
 #define MICROSTEP_PER_STEP (uint32_t)16
 #define NANOSTEP_PER_MICROSTEP (uint32_t)16
 #define NANOSTEP_PER_STEP (uint32_t)(MICROSTEP_PER_STEP*NANOSTEP_PER_MICROSTEP)
-volatile static uint32_t nanospeed_max;		// maximum speed value that the tool may move (even diagonally)
+volatile static uint32_t nanospeed_max;		// maximum speed value that the tool may move with (even diagonally)
 volatile static uint8_t drill_pwm;			// maximum drill speed
 volatile uint8_t timer_interrupt_occured;	// set by timer ISR, initiates a motor state change etc.
 volatile uint8_t global_pwm_counter;		// counts timer interrupts, determines when a new PWM cycle shall begin
@@ -122,8 +122,9 @@ volatile uint8_t global_pwm_counter;		// counts timer interrupts, determines whe
 
 /// Following global variables are separate for each motor
 volatile char status[3]; 		
+volatile char status_dwell; 		
 #define STATUS_IDLE 0
-#define STATUS_RUNNING 1
+#define STATUS_BUSY 1
 
 volatile static uint32_t nanopos[3];	// stores the motor position with bit depth sufficient not only for PWM "microsteps"
 				 	// but also for PWM speed control "nanosteps"
@@ -180,7 +181,7 @@ ISR(TIMER0_OVF_vect)  // TIMER0 interrupt service routine/*{{{*/
 
 usbMsgLen_t usbFunctionSetup(uint8_t data[8])/*{{{*/
 {
-usbRequest_t	*rq = (void *)data;
+	usbRequest_t	*rq = (void *)data;
 	if((rq->bmRequestType & USBRQ_TYPE_MASK) == USBRQ_TYPE_CLASS){	/* HID class request */
 		if(rq->bRequest == USBRQ_HID_GET_REPORT){  /* wValue: ReportType (highbyte), ReportID (lowbyte) */
 			// TODO now the reading starts
@@ -200,36 +201,38 @@ usbRequest_t	*rq = (void *)data;
 	return 0;
 }
 /*}}}*/
-// TODO rename buffer to queue
-#define CMDBUF_NOT_EMPTY  (cmdbufS != cmdbufE)
-#define CMDBUF_NOT_FULL   (((cmdbufE+1)%MAX_CMD_COUNT) != cmdbufS)
-#define CMD_IS_NOT_BUFFERED_TYPE (usb_input_buffer[0] & 0xf0) 
+#define CMDQUEUE_NOT_EMPTY  (cmdqueueS != cmdqueueE)
+#define CMDQUEUE_NOT_FULL   (((cmdqueueE+1)%MAX_CMD_COUNT) != cmdqueueS)
+#define CMD_IS_NOT_QUEUED_TYPE (usb_input_buffer[0] & 0xf0) 
+#define ALL_IDLE ((status[0] == STATUS_IDLE) && (status[1] == STATUS_IDLE) && (status[2] == STATUS_IDLE)) 
+
 
 void execute_command_immediate()
 {
 }
 
-void execute_command_from_buffer()
+void execute_command_from_queue()/*{{{*/
 {
 	cli(); 				// atomic operation
-				//target_nanopos[2] += 10000; nanospeed[2] = 100; // XXX
-	if (cmdbuf[MAX_CMD_LENGTH*cmdbufS] == CMD_MOVE) {		/// "Move" command
-		target_nanopos[0] = *((uint32_t*)(cmdbuf+(MAX_CMD_LENGTH*cmdbufS)+1));
-		target_nanopos[1] = *((uint32_t*)(cmdbuf+(MAX_CMD_LENGTH*cmdbufS)+5));
-		target_nanopos[2] = *((uint32_t*)(cmdbuf+(MAX_CMD_LENGTH*cmdbufS)+9));
-		nanospeed[0]      = *((uint32_t*)(cmdbuf+(MAX_CMD_LENGTH*cmdbufS)+13));
-		nanospeed[1]      = *((uint32_t*)(cmdbuf+(MAX_CMD_LENGTH*cmdbufS)+17));
-		nanospeed[2]      = *((uint32_t*)(cmdbuf+(MAX_CMD_LENGTH*cmdbufS)+21));
-	}
-	
-	//if ((usb_input_buffer[0] == CMD_SET_DRILL_PWM)) {	 /// Sets average voltage on the drill 
-		//drill_pwm = *((uint8_t*)(usb_input_buffer+1));
+	//if (cmdqueue[MAX_CMD_LENGTH*cmdqueueS] == 0x00) {		/// "Move" command
+		//target_nanopos[2] += 100; nanospeed[2] = 100; 
 	//}
-	// TODO clear buf at cmdbufS
-	cmdbufS = (cmdbufS + 1)%MAX_CMD_COUNT;
+	if (cmdqueue[MAX_CMD_LENGTH*cmdqueueS] == CMD_MOVE) {		/// "Move" command
+		target_nanopos[0] = *((uint32_t*)(cmdqueue+(MAX_CMD_LENGTH*cmdqueueS)+1));
+		target_nanopos[1] = *((uint32_t*)(cmdqueue+(MAX_CMD_LENGTH*cmdqueueS)+5));
+		target_nanopos[2] = *((uint32_t*)(cmdqueue+(MAX_CMD_LENGTH*cmdqueueS)+9));
+		nanospeed[0]      = *((uint32_t*)(cmdqueue+(MAX_CMD_LENGTH*cmdqueueS)+13));
+		nanospeed[1]      = *((uint32_t*)(cmdqueue+(MAX_CMD_LENGTH*cmdqueueS)+17));
+		nanospeed[2]      = *((uint32_t*)(cmdqueue+(MAX_CMD_LENGTH*cmdqueueS)+21)); }
+	
+	if (cmdqueue[MAX_CMD_LENGTH*cmdqueueS] == CMD_SET_DRILL_PWM) {	 /// Sets average voltage on the drill 
+		drill_pwm = *((uint8_t*)(cmdqueue+(MAX_CMD_LENGTH*cmdqueueS)+1)); }
+	
+	// TODO clear buf at cmdqueueS
+	cmdqueueS = (cmdqueueS + 1)%MAX_CMD_COUNT;
 	sei();
 }
-
+/*}}}*/
 
 uchar   usbFunctionWrite(uchar *data, uchar len) /*{{{*/
 {	
@@ -242,19 +245,19 @@ uchar   usbFunctionWrite(uchar *data, uchar len) /*{{{*/
 	/// At the last chunk, process the received message 
 	if (len < 8) 
 	{
-		if CMD_IS_NOT_BUFFERED_TYPE {
+		if CMD_IS_NOT_QUEUED_TYPE {
 			execute_command_immediate();}
 		else
 		{
-			if CMDBUF_NOT_FULL 
+			if CMDQUEUE_NOT_FULL 
 			{ 
 				cli();					// atomic (uninterrupted) copying
 				for (dataptr=0; dataptr < MAX_CMD_LENGTH; dataptr++) 
 				{ 
-					cmdbuf[MAX_CMD_LENGTH*cmdbufE + dataptr] = usb_input_buffer[dataptr]; 
+					cmdqueue[MAX_CMD_LENGTH*cmdqueueE + dataptr] = usb_input_buffer[dataptr]; 
 					usb_input_buffer[dataptr] = 0;// clean usb input buffer 
 				}
-				cmdbufE = (cmdbufE + 1)%MAX_CMD_COUNT; 	// shift the cyclic pointer
+				cmdqueueE = (cmdqueueE + 1)%MAX_CMD_COUNT; 	// shift the cyclic pointer
 				sei();
 			}
 			// else drop command and  TODO report error
@@ -266,17 +269,18 @@ uchar   usbFunctionWrite(uchar *data, uchar len) /*{{{*/
 /*}}}*/
 
 
-#define ALL_IDLE ((status[0] == STATUS_IDLE) && (status[1] == STATUS_IDLE) && (status[2] == STATUS_IDLE)) 
-
 uchar   usbFunctionRead(uchar *data, uchar len)
 {
-	// return one byte containing running/idle status, end switch detection, buffer empty, buffer full 
+	// first byte contains status (busy or idle), queue not empty, queue full 
 	data[0] = 0x00;
-	if ALL_IDLE       {data[0] |= 0x01;}
-	if AT_END_SENSOR1 {data[0] |= 0x02;}
-	if AT_END_SENSOR2 {data[0] |= 0x04;}
-	if AT_END_SENSOR3 {data[0] |= 0x08;}
-	return 1; 
+	if (!ALL_IDLE)           {data[0] |= 0x01;}    
+ 	if (!CMDQUEUE_NOT_EMPTY) {data[0] |= 0x02;}
+ 	if (!CMDQUEUE_NOT_FULL)  {data[0] |= 0x04;}
+	data[1] = 0x00;
+	if AT_END_SENSOR1 {data[1] |= 0x01;}
+	if AT_END_SENSOR2 {data[1] |= 0x02;}
+	if AT_END_SENSOR3 {data[1] |= 0x03;}
+	return 2;  //
 }
 /*}}}*/
 
@@ -293,85 +297,84 @@ int main(void) /*{{{*/
     DDRC |= _BV(PC4); // I2C communication pins
     DDRC |= _BV(PC5);
     
-    cmdbufS = 0; cmdbufE = 0;
+    cmdqueueS = 0; cmdqueueE = 0;
 
-	/// USB initialisation
-	odDebugInit(); usbInit(); usbDeviceDisconnect();  					// enforce re-enumeration
-	unsigned char i; i = 0; while(--i){wdt_reset(); _delay_ms(5); }		// fake USB disconnect for > 250 ms
-	usbDeviceConnect(); sei();
-
-
-	/// Set up the internal interrupt timer
-	//	Note: prescaler settings from datasheet: (CS02, ., CS00) = ... 
-	//	(0, 0, 1) --> clkI/1; (0, 1, 0) --> clkI/8; (0, 1, 1) --> clkI/64; (1, 0, 0) --> clkI/256; (1, 0, 1) --> clkI/1024; 
-	//TCCR0 |= 1<<CS02 | 1<<CS00;
-	TCCR0 |=  1<<CS01;
-	TIMSK |= (1 << TOIE0);
-	global_pwm_counter = 0;
-
-
-	/// Hardware testing: Initialize motors and drill 
-	for (uint8_t m=0; m<3; m++) {
-		nanospeed[m] = 1; // todo to be set by EEPROM
-		nanopos[m] = ZERO_POSITION; 
-		target_nanopos[m] = ZERO_POSITION; 
-	}
-	drill_pwm = 0;
-
-	for(;;){				
-		
-		/// Check USB in any idle moment
-		usbPoll();
-
-		/// Timer interrupt is called at 7808 Hz and sets the timer_interrupt_occured variable
-		if (timer_interrupt_occured == 1) {
-			/// PWM check
-			global_pwm_counter++; global_pwm_counter %= MICROSTEP_PER_STEP;
-			/// Let the USB driver check for incoming packets (at the end of this interrupt routine) <--- todo: why?
-			// PWM cycle, called at 488 Hz
-			if (global_pwm_counter == 0) {
-				sei(); // FIXME why??
-				
-				// possibly load a new command
-				if (ALL_IDLE  && CMDBUF_NOT_EMPTY) execute_command_from_buffer(); // XXX test
-
-				// Check arrival at the end sensor; if so, simply clip the motion to current position
-				if AT_END_SENSOR1 { target_nanopos[1-1] = nanopos[1-1]; } 
-				if AT_END_SENSOR2 { target_nanopos[2-1] = nanopos[2-1]; } 
-				if AT_END_SENSOR3 { target_nanopos[3-1] = nanopos[3-1]; } 
-
-				for (uint8_t m=0; m<3; m++) {		// repeat for each motor m 
-					// Set new value of position or PWM for microstepping
-					if (nanopos[m] < target_nanopos[m]) {
-						if ((nanopos[m]+nanospeed[m]) <= target_nanopos[m]) 
-							{nanopos[m] = nanopos[m]+nanospeed[m];}
-						else 
-							{nanopos[m] = target_nanopos[m];};
-					};
-					if (nanopos[m] > target_nanopos[m]) {
-						if ((nanopos[m]-nanospeed[m]) >= target_nanopos[m]) 
-							{nanopos[m] = nanopos[m]-nanospeed[m];}
-						else 
-							{nanopos[m] = target_nanopos[m];};	  // arrived
-					};
-
-					if (nanopos[m] == target_nanopos[m]) { status[m] = STATUS_IDLE;} 
-					else { status[m] = STATUS_RUNNING; }
-					// Precalculate values for the PWM routine
-					real_step[m] = (nanopos[m])/NANOSTEP_PER_STEP;
-					real_pwm[m] = (nanopos[m]%NANOSTEP_PER_STEP)/NANOSTEP_PER_MICROSTEP;
-				}
-				if (drill_pwm > 0) DRILL_PWM_PORT |= DRILL_PWM_PIN; 
-			};
-			// Microstepping using the lookup table
-			if (global_pwm_counter == drill_pwm) DRILL_PWM_PORT &= ~(DRILL_PWM_PIN); 
-			set_motor1_step(real_step[0]+((lookup_table[real_pwm[0]]>>(global_pwm_counter))&0x0001)); 
-			set_motor2_step(real_step[1]+((lookup_table[real_pwm[1]]>>(global_pwm_counter))&0x0001)); 
-			set_motor3_step(real_step[2]+((lookup_table[real_pwm[2]]>>(global_pwm_counter))&0x0001)); 
-			timer_interrupt_occured = 0;
-		};
-	};
-	return 0;
+    /// USB initialisation
+    odDebugInit(); usbInit(); usbDeviceDisconnect();  					// enforce re-enumeration
+    unsigned char i; i = 0; while(--i){wdt_reset(); _delay_ms(5); }		// fake USB disconnect for > 250 ms
+    usbDeviceConnect(); sei();
+    
+    // Set up the internal interrupt timer
+    // Note: prescaler settings from datasheet: (CS02, ., CS00) = ... 
+    // (0, 0, 1) --> clkI/1; (0, 1, 0) --> clkI/8; (0, 1, 1) --> clkI/64; (1, 0, 0) --> clkI/256; (1, 0, 1) --> clkI/1024;
+    //TCCR0 |= 1<<CS02 | 1<<CS00;
+    TCCR0 |=  1<<CS01;
+    TIMSK |= (1 << TOIE0);
+    global_pwm_counter = 0;
+    
+    
+    /// Hardware testing: Initialize motors and drill 
+    for (uint8_t m=0; m<3; m++) {
+    	nanospeed[m] = 1; // todo to be set by EEPROM
+    	nanopos[m] = ZERO_POSITION; 
+    	target_nanopos[m] = ZERO_POSITION; 
+    }
+    drill_pwm = 0;
+    
+    for(;;){				
+    	
+    	/// Check USB in any idle moment
+    	usbPoll();
+    
+    	/// Timer interrupt is called at 7808 Hz and sets the timer_interrupt_occured variable
+    	if (timer_interrupt_occured == 1) {
+    		/// PWM check
+    		global_pwm_counter++; global_pwm_counter %= MICROSTEP_PER_STEP;
+    		/// Let the USB driver check for incoming packets (at the end of this interrupt routine) <--- todo: why?
+    		// PWM cycle, called at 488 Hz
+    		if (global_pwm_counter == 0) {
+    			sei(); // FIXME why??
+    			
+    			// possibly load a new command
+    			if (ALL_IDLE  && CMDQUEUE_NOT_EMPTY) execute_command_from_queue(); // XXX test
+    
+    			// Check arrival at the end sensor; if so, simply clip the motion to current position
+    			if AT_END_SENSOR1 { target_nanopos[1-1] = nanopos[1-1]; } 
+    			if AT_END_SENSOR2 { target_nanopos[2-1] = nanopos[2-1]; } 
+    			if AT_END_SENSOR3 { target_nanopos[3-1] = nanopos[3-1]; } 
+    
+    			for (uint8_t m=0; m<3; m++) {		// repeat for each motor m 
+    				// Set new value of position or PWM for microstepping
+    				if (nanopos[m] < target_nanopos[m]) {
+    					if ((nanopos[m]+nanospeed[m]) <= target_nanopos[m]) 
+    						{nanopos[m] = nanopos[m]+nanospeed[m];}
+    					else 
+    						{nanopos[m] = target_nanopos[m];};
+    				};
+    				if (nanopos[m] > target_nanopos[m]) {
+    					if ((nanopos[m]-nanospeed[m]) >= target_nanopos[m]) 
+    						{nanopos[m] = nanopos[m]-nanospeed[m];}
+    					else 
+    						{nanopos[m] = target_nanopos[m];};	  // arrived
+    				};
+    
+    				if (nanopos[m] == target_nanopos[m]) { status[m] = STATUS_IDLE;} 
+    				else { status[m] = STATUS_BUSY; }
+    				// Precalculate values for the PWM routine
+    				real_step[m] = (nanopos[m])/NANOSTEP_PER_STEP;
+    				real_pwm[m] = (nanopos[m]%NANOSTEP_PER_STEP)/NANOSTEP_PER_MICROSTEP;
+    			}
+    			if (drill_pwm > 0) DRILL_PWM_PORT |= DRILL_PWM_PIN; 
+    		};
+    		// Microstepping using the lookup table
+    		if (global_pwm_counter == drill_pwm) DRILL_PWM_PORT &= ~(DRILL_PWM_PIN); 
+    		set_motor1_step(real_step[0]+((lookup_table[real_pwm[0]]>>(global_pwm_counter))&0x0001)); 
+    		set_motor2_step(real_step[1]+((lookup_table[real_pwm[1]]>>(global_pwm_counter))&0x0001)); 
+    		set_motor3_step(real_step[2]+((lookup_table[real_pwm[2]]>>(global_pwm_counter))&0x0001)); 
+    		timer_interrupt_occured = 0;
+    	};
+    };
+    return 0;
 }
 /*}}}*/
 

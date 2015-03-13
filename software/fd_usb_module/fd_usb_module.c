@@ -16,7 +16,6 @@
 #define CMD_MOTOR_OFF 4
 #define CMD_READ_POSITION 5
 
-
 /* Constant definitions *//*{{{*/
 /*}}}*/
 
@@ -83,8 +82,8 @@ PyObject* WriteASCII(PyObject* self, PyObject* args)/*{{{*/
 };/*}}}*/
 PyObject* IsBusy(PyObject* self, PyObject* args)/*{{{*/
 {
-	unsigned char        buffer[2];    
-    bzero(buffer, sizeof(buffer));
+	unsigned char        buffer[3];    
+        bzero(buffer, sizeof(buffer));
 	
 	/// Init the device
 	usbDevice_t *dev;
@@ -106,13 +105,13 @@ PyObject* IsBusy(PyObject* self, PyObject* args)/*{{{*/
 	int err;
 	if ((err = usbhidGetReport(dev, 0, (char*)buffer, &len)) != 0) {		// XXX error prone XXX
 		fprintf(stderr, "Error reading data: %s\n", usbErrorMessage(err));
-		//return NULL;
-		return Py_BuildValue("i", 16);
+		return NULL;
+		//return Py_BuildValue("i", 16);
 	}
 	//printf("Read data: %d and %d\n", buffer[0], buffer[1]);
 
 	/// Return
-    usbhidCloseDevice(dev);
+	usbhidCloseDevice(dev);
 	return Py_BuildValue("i", buffer[1]);
 
 };/*}}}*/
@@ -120,10 +119,10 @@ PyObject* IsBusy(PyObject* self, PyObject* args)/*{{{*/
 PyObject* Move(PyObject* self, PyObject* args)/*{{{*/
 {
 	unsigned char        buffer[256];    // 1st byte reserved -> 255 bytes is the maximum command length
-    bzero(buffer, sizeof(buffer));
+        bzero(buffer, sizeof(buffer));
 	
 	/// Process the parameter(s) 
-    unsigned int nx, ny, nz, sx, sy, sz;
+        unsigned int nx, ny, nz, sx, sy, sz;
 	if (!PyArg_ParseTuple(args, "IIIIII", &nx, &ny, &nz, &sx, &sy, &sz)) {
        	fprintf(stderr, "Error: wrong parameters\n");
 		return NULL;   // FIXME error-prone?
@@ -152,8 +151,17 @@ PyObject* Move(PyObject* self, PyObject* args)/*{{{*/
 		fprintf(stderr, "Error sending command: %s\n", usbErrorMessage(err));
 		return NULL;
 		}
-    usbhidCloseDevice(dev);
-	return Py_BuildValue("s", "OK" );
+
+	/// Read status
+	int len = sizeof(buffer);
+	if ((err = usbhidGetReport(dev, 0, (char*)buffer, &len)) != 0) {		// XXX error prone XXX
+		fprintf(stderr, "Error reading data: %s\n", usbErrorMessage(err));
+		return NULL;
+		//return Py_BuildValue("i", 16);
+	}
+
+	usbhidCloseDevice(dev);
+	return Py_BuildValue("i", buffer[1]);
 };/*}}}*/
 PyObject* SetDrillPwm(PyObject* self, PyObject* args)/*{{{*/
 {
